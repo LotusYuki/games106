@@ -1,6 +1,10 @@
 #version 450
 
 layout (set = 1, binding = 0) uniform sampler2D samplerColorMap;
+layout (set = 1, binding = 1) uniform sampler2D samplerNormalMap;
+layout (set = 1, binding = 2) uniform sampler2D samplerMetallicRoughnessMap;
+layout (set = 1, binding = 3) uniform sampler2D samplerOcclusionMap;
+layout (set = 1, binding = 4) uniform sampler2D samplerEmissiveMap;
 
 layout (location = 0) in vec3 inNormal;
 layout (location = 1) in vec3 inColor;
@@ -9,12 +13,13 @@ layout (location = 3) in vec3 inViewVec;
 layout (location = 4) in vec3 inLightVec;
 
 layout (location = 5) flat in uint inNodeIndex;
+layout (location = 6) in vec4 inTangent;
 
 layout (location = 0) out vec4 outFragColor;
 
 void main() 
 {
-	vec4 color = texture(samplerColorMap, inUV) * vec4(inColor, 1.0);
+	vec4 color = texture(samplerNormalMap, inUV) * vec4(inColor, 1.0);
 
 	vec3 N = normalize(inNormal);
 	vec3 L = normalize(inLightVec);
