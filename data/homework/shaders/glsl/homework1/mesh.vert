@@ -22,10 +22,9 @@ layout(push_constant) uniform PushConsts {
 layout (location = 0) out vec3 outNormal;
 layout (location = 1) out vec3 outColor;
 layout (location = 2) out vec2 outUV;
-layout (location = 3) out vec3 outViewVec;
-layout (location = 4) out vec3 outLightVec;
-layout (location = 5) out uint outNodeIndex;
-layout (location = 6) out vec4 outTangent;
+layout (location = 3) out vec3 outWorldPos;
+layout (location = 4) out uint outNodeIndex;
+layout (location = 5) out vec4 outTangent;
 
 //forward kinematics transformation matrices
 layout(set=2, binding=0) readonly buffer FkMatrices{
@@ -49,9 +48,6 @@ void main()
 	outColor = inColor.rgb;
 	outUV = inUV;	
 	outTangent = inTangent;
-
-	vec3 pos = worldPos.xyz / worldPos.w;
+	outWorldPos = worldPos.xyz;
 	
-	outViewVec = uboScene.viewPos.xyz - pos;
-	outLightVec = uboScene.lightPos.xzy - pos;
 }
