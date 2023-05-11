@@ -738,6 +738,15 @@ public:
 	bool wireframe = false;
 
 	VulkanglTFModel glTFModel;
+	VulkanglTFModel glTFSkybox;
+
+	struct Textures {
+		vks::TextureCubeMap environmentCube;
+		// Generated at runtime
+		vks::Texture2D lutBrdf;
+		vks::TextureCubeMap irradianceCube;
+		vks::TextureCubeMap prefilteredCube;
+	} textures;
 
 	struct ShaderData
 	{
@@ -843,7 +852,7 @@ public:
 		}
 	}
 
-	void loadglTFFile(std::string filename)
+	void loadglTFFile(std::string filename,VulkanglTFModel* glTFModel)
 	{
 		tinygltf::Model glTFInput;
 		tinygltf::TinyGLTF gltfContext;
@@ -859,27 +868,27 @@ public:
 		bool fileLoaded = gltfContext.LoadASCIIFromFile(&glTFInput, &error, &warning, filename);
 
 		// Pass some Vulkan resources required for setup and rendering to the glTF model loading class
-		glTFModel.vulkanDevice = vulkanDevice;
-		glTFModel.copyQueue = queue;
+		glTFModel->vulkanDevice = vulkanDevice;
+		glTFModel->copyQueue = queue;
 
 		std::vector<uint32_t> indexBuffer;
 		std::vector<VulkanglTFModel::Vertex> vertexBuffer;
 
 		if (fileLoaded)
 		{
-			glTFModel.loadImages(glTFInput);
-			glTFModel.loadMaterials(glTFInput);
-			glTFModel.loadTextures(glTFInput);
-			glTFModel.nodeSize = glTFInput.nodes.size();
+			glTFModel->loadImages(glTFInput);
+			glTFModel->loadMaterials(glTFInput);
+			glTFModel->loadTextures(glTFInput);
+			glTFModel->nodeSize = glTFInput.nodes.size();
 			const tinygltf::Scene &scene = glTFInput.scenes[0];
 			for (size_t i = 0; i < scene.nodes.size(); i++)
 			{
 				const tinygltf::Node node = glTFInput.nodes[scene.nodes[i]];
-				glTFModel.loadNode(node, glTFInput, nullptr, i, indexBuffer, vertexBuffer);
+				glTFModel->loadNode(node, glTFInput, nullptr, i, indexBuffer, vertexBuffer);
 			}
 
 			//load animtaions
-			glTFModel.loadAnimation(glTFInput);
+			glTFModel->loadAnimation(glTFInput);
 		}
 		else
 		{
@@ -893,7 +902,7 @@ public:
 
 		size_t vertexBufferSize = vertexBuffer.size() * sizeof(VulkanglTFModel::Vertex);
 		size_t indexBufferSize = indexBuffer.size() * sizeof(uint32_t);
-		glTFModel.indices.count = static_cast<uint32_t>(indexBuffer.size());
+		glTFModel->indices.count = static_cast<uint32_t>(indexBuffer.size());
 
 		struct StagingBuffer
 		{
@@ -923,14 +932,14 @@ public:
 			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
 			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
 			vertexBufferSize,
-			&glTFModel.vertices.buffer,
-			&glTFModel.vertices.memory));
+			&glTFModel->vertices.buffer,
+			&glTFModel->vertices.memory));
 		VK_CHECK_RESULT(vulkanDevice->createBuffer(
 			VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
 			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
 			indexBufferSize,
-			&glTFModel.indices.buffer,
-			&glTFModel.indices.memory));
+			&glTFModel->indices.buffer,
+			&glTFModel->indices.memory));
 
 		// Copy data from staging buffers (host) do device local buffer (gpu)
 		VkCommandBuffer copyCmd = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
@@ -940,7 +949,7 @@ public:
 		vkCmdCopyBuffer(
 			copyCmd,
 			vertexStaging.buffer,
-			glTFModel.vertices.buffer,
+			glTFModel->vertices.buffer,
 			1,
 			&copyRegion);
 
@@ -948,7 +957,7 @@ public:
 		vkCmdCopyBuffer(
 			copyCmd,
 			indexStaging.buffer,
-			glTFModel.indices.buffer,
+			glTFModel->indices.buffer,
 			1,
 			&copyRegion);
 
@@ -963,7 +972,9 @@ public:
 
 	void loadAssets()
 	{
-		loadglTFFile(getAssetPath() + "buster_drone/busterDrone.gltf");
+		loadglTFFile(getAssetPath() + "models/cube.gltf", &glTFSkybox);
+		loadglTFFile(getAssetPath() + "buster_drone/busterDrone.gltf",&glTFModel);
+		textures.environmentCube.loadFromFile(getAssetPath() + "textures/hdr/gcanyon_cube.ktx", VK_FORMAT_R16G16B16A16_SFLOAT, vulkanDevice, queue);
 	}
 
 	void setupDescriptors()
@@ -1112,6 +1123,25 @@ public:
 		}
 	}
 
+	// Generate a BRDF integration map used as a look-up-table (stores roughness / NdotV)
+	void generateBRDFLUT()
+	{
+
+	}
+
+	// Generate an irradiance cube map from the environment cube map
+	void generateIrradianceCube()
+	{
+
+	}
+
+	// Prefilter environment cubemap
+	// See https://placeholderart.wordpress.com/2015/07/28/implementation-notes-runtime-environment-map-filtering-for-image-based-lighting/
+	void generatePrefilteredCube()
+	{
+
+	}
+
 	// Prepare and initialize uniform buffer containing shader uniforms
 	void prepareUniformBuffers()
 	{
@@ -1140,6 +1170,9 @@ public:
 	{
 		VulkanExampleBase::prepare();
 		loadAssets();
+		generateBRDFLUT();
+		generateIrradianceCube();
+		generatePrefilteredCube();
 		prepareUniformBuffers();
 		setupDescriptors();
 		preparePipelines();
