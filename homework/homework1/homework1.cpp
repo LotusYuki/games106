@@ -815,9 +815,10 @@ public:
 		struct Values
 		{
 			glm::mat4 projection;
-			glm::mat4 model;
+			glm::mat4 view;
 			glm::vec4 lightPos = glm::vec4(5.0f, 5.0f, -5.0f, 1.0f);
 			glm::vec4 viewPos;
+			glm::mat4 model;
 		} values;
 	} shaderData;
 
@@ -907,6 +908,12 @@ public:
 			vkCmdBeginRenderPass(drawCmdBuffers[i], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 			vkCmdSetViewport(drawCmdBuffers[i], 0, 1, &viewport);
 			vkCmdSetScissor(drawCmdBuffers[i], 0, 1, &scissor);
+
+			//skybox
+			vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSetSkybox, 0, NULL);
+			vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.skybox);
+			glTFSkybox.draw(drawCmdBuffers[i], pipelineLayout,false);
+
 			// Bind scene matrices descriptor to set 0
 			vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
 			vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, wireframe ? pipelines.wireframe : pipelines.solid);
@@ -1152,9 +1159,9 @@ public:
 		//skybox
 		allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayouts.matrices, 1);
 		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSetSkybox));
-		std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
-			vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &shaderData.buffer.descriptor),
-			vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, &textures.environmentCube.descriptor),
+		writeDescriptorSets = {
+			vks::initializers::writeDescriptorSet(descriptorSetSkybox, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &shaderData.buffer.descriptor),
+			vks::initializers::writeDescriptorSet(descriptorSetSkybox, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, &textures.environmentCube.descriptor),
 		};
 		vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
 	}
@@ -2216,8 +2223,11 @@ public:
 	void updateUniformBuffers()
 	{
 		shaderData.values.projection = camera.matrices.perspective;
-		shaderData.values.model = camera.matrices.view;
+		shaderData.values.view = camera.matrices.view;
 		shaderData.values.viewPos = camera.viewPos;
+		memcpy(shaderData.buffer.mapped, &shaderData.values, sizeof(shaderData.values));
+
+		shaderData.values.model = glm::mat4(glm::mat3(camera.matrices.view));
 		memcpy(shaderData.buffer.mapped, &shaderData.values, sizeof(shaderData.values));
 	}
 

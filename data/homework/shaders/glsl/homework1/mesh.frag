@@ -6,6 +6,10 @@ layout (set = 1, binding = 2) uniform sampler2D samplerMetallicRoughnessMap;
 layout (set = 1, binding = 3) uniform sampler2D samplerOcclusionMap;
 layout (set = 1, binding = 4) uniform sampler2D samplerEmissiveMap;
 
+layout (set = 0, binding = 1) uniform samplerCube samplerIrradiance;
+layout (set = 0, binding = 2) uniform sampler2D samplerBRDFLUT;
+layout (set = 0, binding = 3) uniform samplerCube prefilteredMap;
+
 layout (set = 0, binding = 0) uniform UBOScene
 {
 	mat4 projection;
@@ -28,7 +32,17 @@ layout (location = 0) out vec4 outFragColor;
 #define PI 3.1415926535897932384626433832795
 #define ALBEDO pow(texture(samplerAlbedoMap, inUV).rgb, vec3(2.2))
 
-
+// From http://filmicgames.com/archives/75
+vec3 Uncharted2Tonemap(vec3 x)
+{
+	float A = 0.15;
+	float B = 0.50;
+	float C = 0.10;
+	float D = 0.20;
+	float E = 0.02;
+	float F = 0.30;
+	return ((x*(A*x+C*B)+D*E)/(x*(A*x+B)+D*F))-E/F;
+}
 
 // Normal Distribution function --------------------------------------
 float D_GGX(float dotNH, float roughness)
@@ -56,6 +70,17 @@ vec3 F_Schlick(float cosTheta, vec3 F0)
 vec3 F_SchlickR(float cosTheta, vec3 F0, float roughness)
 {
 	return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(1.0 - cosTheta, 5.0);
+}
+
+vec3 prefilteredReflection(vec3 R, float roughness)
+{
+	const float MAX_REFLECTION_LOD = 9.0; // todo: param/const
+	float lod = roughness * MAX_REFLECTION_LOD;
+	float lodf = floor(lod);
+	float lodc = ceil(lod);
+	vec3 a = textureLod(prefilteredMap, R, lodf).rgb;
+	vec3 b = textureLod(prefilteredMap, R, lodc).rgb;
+	return mix(a, b, lod - lodf);
 }
 
 vec3 specularContribution(vec3 L, vec3 V, vec3 N, vec3 F0, float metallic, float roughness)
@@ -113,18 +138,30 @@ void main()
 	vec3 Lo = vec3(0.0);
 	vec3 L = normalize(uboScene.lightPos.xyz - inWorldPos);
 	Lo += specularContribution(L, V, N, F0, metallic, roughness);
+
+	vec2 brdf = texture(samplerBRDFLUT, vec2(max(dot(N, V), 0.0), roughness)).rg;
+	vec3 reflection = prefilteredReflection(R, roughness).rgb;	
+	vec3 irradiance = texture(samplerIrradiance, N).rgb;
 	
 	// Diffuse
-	vec3 diffuse = ALBEDO;
+	vec3 diffuse = irradiance * ALBEDO;
 	vec3 F = F_SchlickR(max(dot(N, V), 0.0), F0, roughness);
 
+	// Specular reflectance
+	vec3 specular = reflection * (F * brdf.x + brdf.y);
+
 	//ambient
-	vec3 ambient = vec3(0.03) * diffuse * texture(samplerOcclusionMap, inUV).rrr;
+	vec3 kD = 1.0 - F;
+	kD *= 1.0 - metallic;	  
+	vec3 ambient = (kD * diffuse + specular) * texture(samplerOcclusionMap, inUV).rrr;
 
 	vec3 color = ambient + Lo;
 
-	color = color / (color + vec3(1.0));
-    color = pow(color, vec3(1.0/2.2)); 
+	// Tone mapping
+	color = Uncharted2Tonemap(color * 4.5f);
+	color = color * (1.0f / Uncharted2Tonemap(vec3(11.2f)));	
+	// Gamma correction
+	color = pow(color, vec3(1.0f / 2.2f));
 
 	outFragColor = vec4(color, 1.0);		
 }
