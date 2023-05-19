@@ -1697,7 +1697,7 @@ public:
 			// NEGATIVE_X
 			glm::rotate(glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(0.0f, 1.0f, 0.0f)), glm::radians(180.0f), glm::vec3(1.0f, 0.0f, 0.0f)),
 			// POSITIVE_Y
-			glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f)),
+			glm::rotate(glm::rotate(glm::mat4(1.0f), glm::radians(180.0f), glm::vec3(0.0f, -1.0f, 0.0f)), glm::radians(180.0f), glm::vec3(1.0f, 0.0f, 0.0f)),
 			// NEGATIVE_Y
 			glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f)),
 			// POSITIVE_Z
@@ -2081,7 +2081,7 @@ public:
 			// NEGATIVE_X
 			glm::rotate(glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(0.0f, 1.0f, 0.0f)), glm::radians(180.0f), glm::vec3(1.0f, 0.0f, 0.0f)),
 			// POSITIVE_Y
-			glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f)),
+			glm::rotate(glm::rotate(glm::mat4(1.0f), glm::radians(180.0f), glm::vec3(0.0f, -1.0f, 0.0f)), glm::radians(180.0f), glm::vec3(1.0f, 0.0f, 0.0f)),
 			// NEGATIVE_Y
 			glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f)),
 			// POSITIVE_Z
@@ -2226,6 +2226,7 @@ public:
 		shaderData.values.view = camera.matrices.view;
 		shaderData.values.viewPos = camera.viewPos;
 		memcpy(shaderData.buffer.mapped, &shaderData.values, sizeof(shaderData.values));
+
 
 		shaderData.values.model = glm::mat4(glm::mat3(camera.matrices.view));
 		memcpy(shaderData.buffer.mapped, &shaderData.values, sizeof(shaderData.values));

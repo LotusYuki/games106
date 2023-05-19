@@ -31,10 +31,13 @@ layout(set=2, binding=0) readonly buffer FkMatrices{
 	mat4 fkMatririces[];
 };
 
+
+
 void main() 
 {
 
 	
+
 	outNodeIndex = inNodeIndex;
 
 	//transformation matrix
