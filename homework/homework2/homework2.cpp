@@ -6,6 +6,17 @@
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
 
+/*
+* 首先，我们要创建三个纹理，一个preframeTexture用来存储上一帧的画面，另外两个是nasDataSurface和vrsSurface，这两个都是用来计算着色频率
+* 在framebuffer通过drawCmdBuffers写入到交换链后，就可以把framebuffer的view复制给preframeTexture
+* ComputeNASData.hlsl (content adaptive shading)输入preframeTexture以及把信息写入nasDataSurface，
+* ComputeShadingRate.hlsl (motion adaptive shading)输入nasDataSurface输出vrsSurface
+* vrsSurface相当于该示例的shadingRate.image，用来开启不同的着色频率
+* 关于复制的部分可以参考pbribl的示例generateIrradianceCube()。
+* nasDataSurface和vrsSurface应该可以参考computeshader的示例用法
+* 论文中似乎还要用到gbufferDepth，这部分可以参考defeerred的示例。
+*/
+
 #include "homework2.h"
 
 VulkanExample::VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
@@ -214,6 +225,7 @@ void VulkanExample::prepareShadingRateImage()
 		{ 24.0f, VK_SHADING_RATE_PALETTE_ENTRY_1_INVOCATION_PER_2X4_PIXELS_NV }
 	};
 
+	// Calculate where is the focus position （this is in screen center）
 	uint8_t* ptrData = shadingRatePatternData;
 	for (uint32_t y = 0; y < imageExtent.height; y++) {
 		for (uint32_t x = 0; x < imageExtent.width; x++) {
@@ -409,7 +421,7 @@ void VulkanExample::prepare()
 	deviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
 	deviceProperties2.pNext = &physicalDeviceShadingRateImagePropertiesNV;
 	vkGetPhysicalDeviceProperties2(physicalDevice, &deviceProperties2);
-
+	
 	prepareShadingRateImage();
 	prepareUniformBuffers();
 	setupDescriptors();
