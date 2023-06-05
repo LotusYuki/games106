@@ -11,10 +11,9 @@
 * 在framebuffer通过drawCmdBuffers写入到交换链后，就可以把framebuffer的view复制给preframeTexture
 * ComputeNASData.hlsl (content adaptive shading)输入preframeTexture以及把信息写入nasDataSurface，
 * ComputeShadingRate.hlsl (motion adaptive shading)输入nasDataSurface输出vrsSurface
-* vrsSurface相当于该示例的shadingRate.image，用来开启不同的着色频率
 * 关于复制的部分可以参考pbribl的示例generateIrradianceCube()。
 * nasDataSurface和vrsSurface应该可以参考computeshader的示例用法
-* 论文中似乎还要用到gbufferDepth，这部分可以参考defeerred的示例。
+* 论文中似乎还要用到gbufferDepth，这部分可以参考deferred的示例。
 */
 
 #include "homework2.h"
@@ -69,6 +68,97 @@ void VulkanExample::handleResize()
 	// Recreate image
 	prepareShadingRateImage();
 	resized = false;
+}
+
+void VulkanExample::prepareTextureTarget(vks::Texture *tex, uint32_t width, uint32_t height, VkFormat format)
+{
+	VkFormatProperties formatProperties;
+
+	// Get device properties for the requested texture format
+	vkGetPhysicalDeviceFormatProperties(physicalDevice, format, &formatProperties);
+	// Check if requested image format supports image storage operations
+	assert(formatProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT);
+
+	// Prepare blit target texture
+	tex->width = width;
+	tex->height = height;
+
+	VkImageCreateInfo imageCreateInfo = vks::initializers::imageCreateInfo();
+	imageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
+	imageCreateInfo.format = format;
+	imageCreateInfo.extent = { width, height, 1 };
+	imageCreateInfo.mipLevels = 1;
+	imageCreateInfo.arrayLayers = 1;
+	imageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+	imageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+	// Image will be sampled in the fragment shader and used as storage target in the compute shader
+	imageCreateInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+	imageCreateInfo.flags = 0;
+	// If compute and graphics queue family indices differ, we create an image that can be shared between them
+	// This can result in worse performance than exclusive sharing mode, but save some synchronization to keep the sample simple
+	std::vector<uint32_t> queueFamilyIndices;
+	if (vulkanDevice->queueFamilyIndices.graphics != vulkanDevice->queueFamilyIndices.compute) {
+		queueFamilyIndices = {
+			vulkanDevice->queueFamilyIndices.graphics,
+			vulkanDevice->queueFamilyIndices.compute
+		};
+		imageCreateInfo.sharingMode = VK_SHARING_MODE_CONCURRENT;
+		imageCreateInfo.queueFamilyIndexCount = 2;
+		imageCreateInfo.pQueueFamilyIndices = queueFamilyIndices.data();
+	}
+
+	VkMemoryAllocateInfo memAllocInfo = vks::initializers::memoryAllocateInfo();
+	VkMemoryRequirements memReqs;
+
+	VK_CHECK_RESULT(vkCreateImage(device, &imageCreateInfo, nullptr, &tex->image));
+
+	vkGetImageMemoryRequirements(device, tex->image, &memReqs);
+	memAllocInfo.allocationSize = memReqs.size;
+	memAllocInfo.memoryTypeIndex = vulkanDevice->getMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+	VK_CHECK_RESULT(vkAllocateMemory(device, &memAllocInfo, nullptr, &tex->deviceMemory));
+	VK_CHECK_RESULT(vkBindImageMemory(device, tex->image, tex->deviceMemory, 0));
+
+	VkCommandBuffer layoutCmd = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+
+	tex->imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+	vks::tools::setImageLayout(
+		layoutCmd, tex->image,
+		VK_IMAGE_ASPECT_COLOR_BIT,
+		VK_IMAGE_LAYOUT_UNDEFINED,
+		tex->imageLayout);
+
+	vulkanDevice->flushCommandBuffer(layoutCmd, queue, true);
+
+	// Create sampler
+	VkSamplerCreateInfo sampler = vks::initializers::samplerCreateInfo();
+	sampler.magFilter = VK_FILTER_LINEAR;
+	sampler.minFilter = VK_FILTER_LINEAR;
+	sampler.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+	sampler.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+	sampler.addressModeV = sampler.addressModeU;
+	sampler.addressModeW = sampler.addressModeU;
+	sampler.mipLodBias = 0.0f;
+	sampler.maxAnisotropy = 1.0f;
+	sampler.compareOp = VK_COMPARE_OP_NEVER;
+	sampler.minLod = 0.0f;
+	sampler.maxLod = tex->mipLevels;
+	sampler.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+	VK_CHECK_RESULT(vkCreateSampler(device, &sampler, nullptr, &tex->sampler));
+
+	// Create image view
+	VkImageViewCreateInfo view = vks::initializers::imageViewCreateInfo();
+	view.image = VK_NULL_HANDLE;
+	view.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	view.format = format;
+	view.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+	view.image = tex->image;
+	VK_CHECK_RESULT(vkCreateImageView(device, &view, nullptr, &tex->view));
+
+	// Initialize a descriptor for later use
+	tex->descriptor.imageLayout = tex->imageLayout;
+	tex->descriptor.imageView = tex->view;
+	tex->descriptor.sampler = tex->sampler;
+	tex->device = vulkanDevice;
 }
 
 void VulkanExample::buildCommandBuffers()
@@ -135,6 +225,7 @@ void VulkanExample::setupDescriptors()
 	// Pool
 	const std::vector<VkDescriptorPoolSize> poolSizes = {
 		vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1),
+		vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2),
 	};
 	VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, 1);
 	VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
@@ -142,6 +233,7 @@ void VulkanExample::setupDescriptors()
 	// Descriptor set layout
 	const std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
 		vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0),
+		vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1)
 	};
 	VkDescriptorSetLayoutCreateInfo descriptorLayout = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
 	VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayout));
@@ -159,6 +251,7 @@ void VulkanExample::setupDescriptors()
 	VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet));
 	std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
 		vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &shaderData.buffer.descriptor),
+		vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, &preFrameTexture.descriptor),
 	};
 	vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
 }
@@ -169,8 +262,8 @@ void VulkanExample::prepareShadingRateImage()
 	// Shading rate image size depends on shading rate texel size
 	// For each texel in the target image, there is a corresponding shading texel size width x height block in the shading rate image
 	VkExtent3D imageExtent{};
-	imageExtent.width = static_cast<uint32_t>(ceil(width / (float)physicalDeviceShadingRateImagePropertiesNV.shadingRateTexelSize.width));
-	imageExtent.height = static_cast<uint32_t>(ceil(height / (float)physicalDeviceShadingRateImagePropertiesNV.shadingRateTexelSize.height));
+	imageExtent.width = static_cast<uint32_t>(ceil(width / (float)physicalDeviceShadingRateImagePropertiesNV.shadingRateTexelSize.width));//width/16
+	imageExtent.height = static_cast<uint32_t>(ceil(height / (float)physicalDeviceShadingRateImagePropertiesNV.shadingRateTexelSize.height));//height/16
 	imageExtent.depth = 1;
 
 	VkImageCreateInfo imageCI{};
@@ -413,6 +506,15 @@ void VulkanExample::prepare()
 {
 	VulkanExampleBase::prepare();
 	loadAssets();
+	//准备保存上一帧画面的Texture以及记录Compute shader计算结果的Texture
+	//只用Content adaptive时，Format格式要改一下
+	prepareTextureTarget(&nasDataSurface,
+						static_cast<uint32_t>(ceil(width / (float)physicalDeviceShadingRateImagePropertiesNV.shadingRateTexelSize.width)),
+						static_cast<uint32_t>(ceil(height / (float)physicalDeviceShadingRateImagePropertiesNV.shadingRateTexelSize.height)),
+						VK_FORMAT_R16G16_SFLOAT);
+
+	prepareTextureTarget(&preFrameTexture, width, height,VK_FORMAT_R8G8B8A8_UNORM);
+
 	
 	// [POI]
 	vkCmdBindShadingRateImageNV = reinterpret_cast<PFN_vkCmdBindShadingRateImageNV>(vkGetDeviceProcAddr(device, "vkCmdBindShadingRateImageNV"));
@@ -430,9 +532,96 @@ void VulkanExample::prepare()
 	prepared = true;
 }
 
+void VulkanExample::draw()
+{
+	VulkanExampleBase::prepareFrame();
+	submitInfo.commandBufferCount = 1;
+	submitInfo.pCommandBuffers = &drawCmdBuffers[currentBuffer];
+	VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
+	VulkanExampleBase::submitFrame();
+	copyPreFrameToTexture();
+}
+
+//现在把ui也复制进去，还有颜色不对
+void VulkanExample::copyPreFrameToTexture()
+{
+	VkCommandBuffer cmdBuf = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+	
+	//要被复制进来的texture
+	VkImageSubresourceRange subresourceRange = {};
+		subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		subresourceRange.baseMipLevel = 0;
+		subresourceRange.levelCount = 1;
+		subresourceRange.layerCount = 1;
+	vks::tools::setImageLayout(
+			cmdBuf,
+			preFrameTexture.image,
+			VK_IMAGE_LAYOUT_UNDEFINED,
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			subresourceRange);
+
+	//要被复制的交换链上的图像
+	vks::tools::setImageLayout(
+					cmdBuf,
+					swapChain.buffers[currentBuffer].image,
+					VK_IMAGE_ASPECT_COLOR_BIT,
+					VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+					VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+
+	
+	// Copy region for transfer from framebuffer to cube face
+	VkImageCopy copyRegion = {};
+
+	copyRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	copyRegion.srcSubresource.baseArrayLayer = 0;
+	copyRegion.srcSubresource.mipLevel = 0;
+	copyRegion.srcSubresource.layerCount = 1;
+	copyRegion.srcOffset = { 0, 0, 0 };
+
+	copyRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	copyRegion.dstSubresource.baseArrayLayer = 0;
+	copyRegion.dstSubresource.mipLevel = 0;
+	copyRegion.dstSubresource.layerCount = 1;
+	copyRegion.dstOffset = { 0, 0, 0 };
+
+	copyRegion.extent.width = static_cast<uint32_t>(width);
+	copyRegion.extent.height = static_cast<uint32_t>(height);
+	copyRegion.extent.depth = 1;
+
+	vkCmdCopyImage(
+		cmdBuf,
+		swapChain.buffers[currentBuffer].image,
+		VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		preFrameTexture.image,
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		1,
+		&copyRegion);
+
+	// Transform framebuffer color attachment back
+	vks::tools::setImageLayout(
+		cmdBuf,
+		swapChain.buffers[currentBuffer].image,
+		VK_IMAGE_ASPECT_COLOR_BIT,
+		VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
+	vks::tools::setImageLayout(
+			cmdBuf,
+			preFrameTexture.image,
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			subresourceRange);
+
+	vulkanDevice->flushCommandBuffer(cmdBuf, queue);
+
+	
+}
+
 void VulkanExample::render()
 {
-	renderFrame();
+	if(!prepared)
+	  return;
+	VulkanExample::draw();
 	if (camera.updated) {
 		updateUniformBuffers();
 	}

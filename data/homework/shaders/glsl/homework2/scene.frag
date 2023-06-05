@@ -21,6 +21,8 @@ layout (set = 0, binding = 0) uniform UBOScene
 	vec4 viewPos;
 	int colorShadingRates;
 } uboScene;
+layout (set = 0, binding = 1) uniform sampler2D preframeTexture;
+
 
 layout (location = 0) out vec4 outFragColor;
 

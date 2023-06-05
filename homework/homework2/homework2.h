@@ -42,6 +42,10 @@ public:
 		VkPipeline masked;
 	};
 
+	vks::Texture2D preFrameTexture;
+	vks::Texture2D nasDataSurface;
+	vks::Texture2D vrsSurface;
+
 	Pipelines basePipelines;
 	Pipelines shadingRatePipelines;
 
@@ -66,6 +70,9 @@ public:
 	void prepareUniformBuffers();
 	void updateUniformBuffers();
 	void prepare();
+	void draw();
+	void prepareTextureTarget(vks::Texture *tex, uint32_t width, uint32_t height, VkFormat format);
+	void copyPreFrameToTexture();
 	virtual void render();
 	virtual void OnUpdateUIOverlay(vks::UIOverlay* overlay);
 };
