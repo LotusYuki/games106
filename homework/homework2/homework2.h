@@ -9,6 +9,7 @@
 #include "vulkanexamplebase.h"
 #include "VulkanglTFModel.h"
 
+#define VERTEX_BUFFER_BIND_ID 0
 #define ENABLE_VALIDATION false
 
 class VulkanExample : public VulkanExampleBase
@@ -42,9 +43,40 @@ public:
 		VkPipeline masked;
 	};
 
-	vks::Texture2D preFrameTexture;
+/*****************************************/
+	struct {
+		VkImage image;
+		VkDeviceMemory mem;
+		VkImageView view;
+	} preframeDepthStencil;
+
+	struct Vertex {
+		float pos[3];
+		float uv[2];
+	};
+	struct {
+		VkPipelineVertexInputStateCreateInfo inputState;
+		std::vector<VkVertexInputBindingDescription> bindingDescriptions;
+		std::vector<VkVertexInputAttributeDescription> attributeDescriptions;
+	} vertices;
+	vks::Buffer vertexBuffer;
+	vks::Buffer indexBuffer;
+	uint32_t indexCount;
+
+	VkRenderPass preframeRenderPass;
+	VkFramebuffer preframeFramebuffer;
+	VkCommandBuffer preframeCmdBuffer;
+	vks::Texture2D preframeTexture;
 	vks::Texture2D nasDataSurface;
 	vks::Texture2D vrsSurface;
+	VkSampler colorSampler;
+	void prepareTextureTarget(vks::Texture *tex, uint32_t width, uint32_t height, VkFormat format);
+	void copyPreframeToTexture();
+	void setupPreframeBuffer();
+	void buildPreframeCommandBuffers();
+	void generateQuad();
+	void setupVertexDescriptions();
+/*****************************************/
 
 	Pipelines basePipelines;
 	Pipelines shadingRatePipelines;
@@ -71,8 +103,6 @@ public:
 	void updateUniformBuffers();
 	void prepare();
 	void draw();
-	void prepareTextureTarget(vks::Texture *tex, uint32_t width, uint32_t height, VkFormat format);
-	void copyPreFrameToTexture();
 	virtual void render();
 	virtual void OnUpdateUIOverlay(vks::UIOverlay* overlay);
 };
