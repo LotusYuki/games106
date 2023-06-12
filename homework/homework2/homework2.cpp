@@ -11,7 +11,8 @@
  * 在framebuffer通过drawCmdBuffers写入到交换链后，就可以把framebuffer的view复制给preframeTexture
  * 直接复制上一帧的交换链图像有问题
  ** 尝试一，写多一个渲染通道输出画面
- ** 多写一个pass来输出上一帧画面,然后最后输出到交换链那一步直接采样该pass的图像
+ ** 多写一个pass来输出上一帧画面,然后最后输出到交换链那一步直接采样该pass的图像（问题：会把UI也复制进去）
+ ** 最终做法，先用一个pass渲染好这一帧，保存下来作为preframe texture，然后渲染到quad上，下一帧就可以用preframe texture来计算shading rate
  * ComputeNASData.hlsl (content adaptive shading)输入preframeTexture以及把信息写入nasDataSurface，
  * ComputeShadingRate.hlsl (motion adaptive shading)输入nasDataSurface输出vrsSurface
  * 关于复制的部分可以参考pbribl的示例generateIrradianceCube()。
