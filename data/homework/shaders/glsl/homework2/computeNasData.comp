@@ -1,0 +1,136 @@
+#version 450
+#extension GL_KHR_shader_subgroup_arithmetic : require
+
+layout (local_size_x = 8, local_size_y = 4, local_size_z = 1) in;
+layout (binding = 0, rgba8) uniform readonly image2D prevFrameColors;
+layout (binding = 1, r32ui) uniform uimage2D vrsSurface;
+
+
+float RgbToLuminance(vec3 color)
+{
+    return dot(color, vec3(0.299, 0.587, 0.114));
+}
+
+//SV_DispatchThreadID -> gl_GlobalInvocationID
+//SV_GroupThreadID -> gl_LocalInvocationID
+//SV_GroupID -> gl_WorkGroupID
+
+void main()
+{	
+    uvec2 localID = gl_LocalInvocationID.xy;
+    localID.x <<= 1;
+    localID.y <<= 2;
+
+    uvec2 tileOffset = gl_WorkGroupID.xy << 4;
+
+    // Global block coordinates
+    ivec2 blockBaseCoord = ivec2(tileOffset + localID);
+
+    // Fetch color (final post-AA) data
+    // l0.x  l0.y
+    // l0.z  l0.w  l2.x
+    // l1.x  l1.y
+    // l1.z  l1.w  l2.y
+    //		 l2.z
+
+    vec4 l0;
+    l0.x = RgbToLuminance(imageLoad(prevFrameColors, ivec2(blockBaseCoord.x, blockBaseCoord.y)+ivec2(0,0)).rgb);
+    l0.y = RgbToLuminance(imageLoad(prevFrameColors, ivec2(blockBaseCoord.x, blockBaseCoord.y)+ivec2(1,0)).rgb);
+    l0.z = RgbToLuminance(imageLoad(prevFrameColors, ivec2(blockBaseCoord.x, blockBaseCoord.y)+ivec2(0,1)).rgb);
+    l0.w = RgbToLuminance(imageLoad(prevFrameColors, ivec2(blockBaseCoord.x, blockBaseCoord.y)+ivec2(1,1)).rgb);
+
+    vec4 l1;
+    l1.x = RgbToLuminance(imageLoad(prevFrameColors, ivec2(blockBaseCoord.x, blockBaseCoord.y)+ivec2(0,2)).rgb);
+    l1.y = RgbToLuminance(imageLoad(prevFrameColors, ivec2(blockBaseCoord.x, blockBaseCoord.y)+ivec2(1,2)).rgb);
+    l1.z = RgbToLuminance(imageLoad(prevFrameColors, ivec2(blockBaseCoord.x, blockBaseCoord.y)+ivec2(0,3)).rgb);
+    l1.w = RgbToLuminance(imageLoad(prevFrameColors, ivec2(blockBaseCoord.x, blockBaseCoord.y)+ivec2(1,3)).rgb);
+
+    vec4 l2;
+    l2.x = RgbToLuminance(imageLoad(prevFrameColors, ivec2(blockBaseCoord.x, blockBaseCoord.y)+ivec2(2,1)).rgb);
+    l2.y = RgbToLuminance(imageLoad(prevFrameColors, ivec2(blockBaseCoord.x, blockBaseCoord.y)+ivec2(2,3)).rgb);
+    l2.z = RgbToLuminance(imageLoad(prevFrameColors, ivec2(blockBaseCoord.x, blockBaseCoord.y)+ivec2(1,4)).rgb);
+
+    // Derivatives X
+    vec4 a = vec4(l0.y, l2.x, l1.y, l2.y);
+    vec4 b = vec4(l0.x, l0.w, l1.x, l1.w);
+    vec4 dx = abs(a - b);
+
+    // Derivatives Y
+    a = vec4(l0.z, l1.y, l1.z, l2.z);
+    b = vec4(l0.x, l0.w, l1.x, l1.w);
+    vec4 dy = abs(a - b);
+
+    // Compute block average luma (8 total samples)
+    vec4 sumAB = l0 + l1;
+    float avgLuma = (sumAB.x + sumAB.y + sumAB.z + sumAB.w) / 8;
+    avgLuma = subgroupAdd(avgLuma) / gl_SubgroupSize + 0.1;
+
+    // Compute maximum partial derivative of all 16x16 pixels (256 total)
+    // one thread works on 2x4 pixels, one wave has 32 threads, 2x4x32 = 256
+    // this approach is more "sensitive" to individual outliers in a tile, since it takes the max instead of the average
+    float maxDx = max(max(dx.x, dx.y), max(dx.z, dx.w));
+    float maxDy = max(max(dy.x, dy.y), max(dy.z, dy.w));
+    float errXH = subgroupMax(maxDx) / abs(avgLuma);
+    float errYH = subgroupMax(maxDy) / abs(avgLuma);
+    float errXQ = errXH * 2.13;
+    float errYQ = errYH * 2.13;
+
+    // VK_SHADING_RATE_PALETTE_ENTRY_1_INVOCATION_PER_PIXEL_NV = 5,
+    // VK_SHADING_RATE_PALETTE_ENTRY_1_INVOCATION_PER_2X1_PIXELS_NV = 6,
+    // VK_SHADING_RATE_PALETTE_ENTRY_1_INVOCATION_PER_1X2_PIXELS_NV = 7,
+    // VK_SHADING_RATE_PALETTE_ENTRY_1_INVOCATION_PER_2X2_PIXELS_NV = 8,
+    // VK_SHADING_RATE_PALETTE_ENTRY_1_INVOCATION_PER_4X2_PIXELS_NV = 9,
+    // VK_SHADING_RATE_PALETTE_ENTRY_1_INVOCATION_PER_2X4_PIXELS_NV = 10,
+    // VK_SHADING_RATE_PALETTE_ENTRY_1_INVOCATION_PER_4X4_PIXELS_NV = 11,
+    float threshold = 0.1;
+
+    uint ShadingRate = 0;
+    uint rate = 5;
+    ShadingRate |= ((errXH >= threshold) ? 0 : ((errXQ > threshold) ? 0x4 : 0x8));
+    ShadingRate |= ((errYH >= threshold) ? 0 : ((errYQ > threshold) ? 0x1 : 0x2));
+
+    // Disable 4x4 shading rate (low quality, limited perf gain)
+    if (ShadingRate == 0xa)
+    {
+        ShadingRate = (errXH > errYH) ? 0x6 : 0x9; // use 2x4 or 4x2 based on directional gradient
+    }
+    // Disable 4x1 or 1x4 shading rate (unsupported)
+    else if (ShadingRate == 0x8)
+    {
+        ShadingRate = 0x4;
+    }
+    else if (ShadingRate == 0x2)
+    {
+        ShadingRate = 0x1;
+    }
+
+
+    if(ShadingRate == 0)
+    {
+        rate = 5;
+    }
+    else if(ShadingRate == 0x1)
+    {
+        rate = 7;
+    }
+    else if(ShadingRate == 0x4)
+    {
+        rate = 6;
+    }
+    else if(ShadingRate == 0x5)
+    {
+        rate = 8;
+    }
+    else if(ShadingRate == 0x6)
+    {
+        rate = 10;
+    }
+    else if(ShadingRate == 0x9)
+    {
+        rate = 9;
+    }
+
+    imageStore(vrsSurface, ivec2(gl_WorkGroupID.xy), uvec4(rate,0,0,1));
+
+}
+

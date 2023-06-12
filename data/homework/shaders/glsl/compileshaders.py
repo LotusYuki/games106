@@ -40,7 +40,7 @@ for root, dirs, files in os.walk(dir_path):
             if args.g:
                 add_params = "-g"
 
-            if file.endswith(".rgen") or file.endswith(".rchit") or file.endswith(".rmiss"):
+            if file.endswith(".rgen") or file.endswith(".rchit") or file.endswith(".rmiss") or file.endswith(".comp"):
                add_params = add_params + " --target-env vulkan1.2"
 
             res = subprocess.call("%s -V %s -o %s %s" % (glslang_path, input_file, output_file, add_params), shell=True)

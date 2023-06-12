@@ -49,19 +49,33 @@ public:
 		VkDeviceMemory mem;
 		VkImageView view;
 	} preframeDepthStencil;
-
-	struct Vertex {
-		float pos[3];
-		float uv[2];
-	};
 	struct {
 		VkPipelineVertexInputStateCreateInfo inputState;
 		std::vector<VkVertexInputBindingDescription> bindingDescriptions;
 		std::vector<VkVertexInputAttributeDescription> attributeDescriptions;
 	} vertices;
-	vks::Buffer vertexBuffer;
-	vks::Buffer indexBuffer;
-	uint32_t indexCount;
+	struct {
+		VkDescriptorSetLayout descriptorSetLayout;	// Image display shader binding layout
+		VkDescriptorSet descriptorSet;	// Image display shader bindings before compute shader image manipulation
+		VkPipeline pipeline;						// Image display pipeline
+	    VkPipeline shadingRatePipelines;			// Image display pipeline
+		VkPipelineLayout pipelineLayout;			// Layout of the graphics pipeline
+		VkSemaphore semaphore;                      // Execution dependency between compute & graphic submission
+	} graphics;
+
+	// Resources for the compute part of the example
+	struct Compute {
+		VkQueue queue;								// Separate queue for compute commands (queue family may differ from the one used for graphics)
+		VkCommandPool commandPool;					// Use a separate command pool (queue family may differ from the one used for graphics)
+		VkCommandBuffer commandBuffer;				// Command buffer storing the dispatch commands and barriers
+		VkSemaphore semaphore;                      // Execution dependency between compute & graphic submission
+		VkDescriptorSetLayout descriptorSetLayout;	// Compute shader binding layout
+		VkDescriptorSet descriptorSet;				// Compute shader bindings
+		VkPipelineLayout pipelineLayout;			// Layout of the compute pipeline
+		std::vector<VkPipeline> pipelines;			// Compute pipelines for image filters
+		int32_t pipelineIndex = 0;					// Current image filtering compute pipeline index
+	} compute;
+
 
 	VkRenderPass preframeRenderPass;
 	VkFramebuffer preframeFramebuffer;
@@ -70,12 +84,13 @@ public:
 	vks::Texture2D nasDataSurface;
 	vks::Texture2D vrsSurface;
 	VkSampler colorSampler;
-	void prepareTextureTarget(vks::Texture *tex, uint32_t width, uint32_t height, VkFormat format);
-	void copyPreframeToTexture();
+	void prepareTextureTarget(vks::Texture *tex, uint32_t width, uint32_t height, VkFormat format, VkImageLayout imageLayout = VK_IMAGE_LAYOUT_UNDEFINED);
 	void setupPreframeBuffer();
 	void buildPreframeCommandBuffers();
-	void generateQuad();
-	void setupVertexDescriptions();
+	void prepareTexturePipelines();
+	void prepareGraphics();
+	void prepareNasDataCompute();
+	void buildComputeNasDataCommandBuffer();
 /*****************************************/
 
 	Pipelines basePipelines;
