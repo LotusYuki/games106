@@ -4,7 +4,10 @@
 layout (local_size_x = 8, local_size_y = 4, local_size_z = 1) in;
 layout (binding = 0, rgba8) uniform readonly image2D prevFrameColors;
 layout (binding = 1, r32ui) uniform uimage2D vrsSurface;
-
+layout (binding = 2) uniform ComputeNASDataConstants 
+{
+	float brightnessSensitivity;
+} computeNASDataConstants;
 
 float RgbToLuminance(vec3 color)
 {
@@ -82,7 +85,7 @@ void main()
     // VK_SHADING_RATE_PALETTE_ENTRY_1_INVOCATION_PER_4X2_PIXELS_NV = 9,
     // VK_SHADING_RATE_PALETTE_ENTRY_1_INVOCATION_PER_2X4_PIXELS_NV = 10,
     // VK_SHADING_RATE_PALETTE_ENTRY_1_INVOCATION_PER_4X4_PIXELS_NV = 11,
-    float threshold = 0.1;
+    float threshold = computeNASDataConstants.brightnessSensitivity;
 
     uint ShadingRate = 0;
     uint rate = 5;
