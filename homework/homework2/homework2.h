@@ -63,6 +63,15 @@ public:
 		VkSemaphore semaphore;                      // Execution dependency between compute & graphic submission
 	} graphics;
 
+	struct {
+		vks::Buffer computeNASDataBuffer;
+	} uniformBuffers;
+
+	struct ComputeNASDataConstants
+	{
+		float brightnessSensitivity = 0.07;
+	}computeNASDataConstants;
+
 	// Resources for the compute part of the example
 	struct Compute {
 		VkQueue queue;								// Separate queue for compute commands (queue family may differ from the one used for graphics)
@@ -91,6 +100,7 @@ public:
 	void prepareGraphics();
 	void prepareNasDataCompute();
 	void buildComputeNasDataCommandBuffer();
+	void updateParams();
 /*****************************************/
 
 	Pipelines basePipelines;

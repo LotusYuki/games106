@@ -220,7 +220,7 @@ void VulkanExample::setupDescriptors()
 {
 	// Pool
 	const std::vector<VkDescriptorPoolSize> poolSizes = {
-		vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3),
+		vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 4),
 		vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4),
 		// Compute pipelines uses a storage image for image reads and writes
 		vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 4),
@@ -515,8 +515,18 @@ void VulkanExample::prepareUniformBuffers()
 		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
 		&shaderData.buffer,
 		sizeof(shaderData.values)));
+	// Shared parameter uniform buffer
+	VK_CHECK_RESULT(vulkanDevice->createBuffer(
+		VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+		&uniformBuffers.computeNASDataBuffer,
+		sizeof(computeNASDataConstants)));
+
+
 	VK_CHECK_RESULT(shaderData.buffer.map());
+	VK_CHECK_RESULT(uniformBuffers.computeNASDataBuffer.map());
 	updateUniformBuffers();
+	updateParams();
 }
 
 void VulkanExample::updateUniformBuffers()
@@ -526,6 +536,11 @@ void VulkanExample::updateUniformBuffers()
 	shaderData.values.viewPos = camera.viewPos;
 	shaderData.values.colorShadingRate = colorShadingRate;
 	memcpy(shaderData.buffer.mapped, &shaderData.values, sizeof(shaderData.values));
+}
+
+void VulkanExample::updateParams()
+{
+	memcpy(uniformBuffers.computeNASDataBuffer.mapped, &computeNASDataConstants, sizeof(computeNASDataConstants));
 }
 
 void VulkanExample::prepare()
@@ -634,6 +649,9 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay *overlay)
 	{
 		updateUniformBuffers();
 	}
+	if (overlay->inputFloat("BrightnessSensitivity", &computeNASDataConstants.brightnessSensitivity, 0.01f, 2)) {
+		updateParams();
+	}
 }
 
 /*
@@ -657,6 +675,8 @@ void VulkanExample::prepareNasDataCompute()
 		vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT, 0),
 		// Binding 1: Output image (write)
 		vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT, 1),
+		//Binding 2
+		vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 2),
 	};
 
 
@@ -674,7 +694,8 @@ void VulkanExample::prepareNasDataCompute()
 	VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &compute.descriptorSet));
 	std::vector<VkWriteDescriptorSet> computeWriteDescriptorSets = {
 		vks::initializers::writeDescriptorSet(compute.descriptorSet, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 0, &preframeTexture.descriptor),
-		vks::initializers::writeDescriptorSet(compute.descriptorSet, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, &vrsSurface.descriptor)
+		vks::initializers::writeDescriptorSet(compute.descriptorSet, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, &vrsSurface.descriptor),
+		vks::initializers::writeDescriptorSet(compute.descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2, &uniformBuffers.computeNASDataBuffer.descriptor),
 	};
 	vkUpdateDescriptorSets(device, computeWriteDescriptorSets.size(), computeWriteDescriptorSets.data(), 0, NULL);
 
