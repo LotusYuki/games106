@@ -809,7 +809,7 @@ void VulkanExample::prepareShadingRateCompute()
 		// Binding 0: Gbuffer Depth image (read-only)
 		vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT, 0),
 		// Binding 1: nasDataSurface (read-only)
-		vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT, 1),
+		vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT, 1),
 		// Binding 2: Output vrsSurface image (write)
 		vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT, 2),
 		//Binding 3 ： unibuffer
@@ -837,7 +837,7 @@ void VulkanExample::prepareShadingRateCompute()
 	VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &computeShadingRate.descriptorSet));
 	std::vector<VkWriteDescriptorSet> computeWriteDescriptorSets = {
 		vks::initializers::writeDescriptorSet(computeShadingRate.descriptorSet, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 0, &preframeDepthStencilTexture),
-		vks::initializers::writeDescriptorSet(computeShadingRate.descriptorSet, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, &nasDataSurface.descriptor),
+		vks::initializers::writeDescriptorSet(computeShadingRate.descriptorSet, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, &nasDataSurface.descriptor),
 		vks::initializers::writeDescriptorSet(computeShadingRate.descriptorSet, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2, &vrsSurface.descriptor),
 		vks::initializers::writeDescriptorSet(computeShadingRate.descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3, &uniformBuffers.adaptiveShadingConstantsBuffer.descriptor),
 	};

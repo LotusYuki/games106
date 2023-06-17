@@ -3,7 +3,7 @@
 
 layout (local_size_x = 8, local_size_y = 4, local_size_z = 1) in;
 layout (binding = 0, r32f) uniform readonly image2D gBufferDepth;
-layout (binding = 1, rgba16f) uniform readonly image2D nasDataSurface;
+layout (binding = 1) uniform sampler2D nasDataSurface;
 layout (binding = 2, r32ui) uniform uimage2D vrsSurface;
 layout (binding = 3) uniform AdaptiveShadingConstants 
 {
@@ -91,7 +91,7 @@ void main()
         vec2 bhv = pow(1.0 / (1 + pow(1.05 * mVec, vec2(3.1))), vec2(0.35));
         vec2 bqv = 2.13 * pow(1.0 / (1 + pow(0.55 * mVec, vec2(2.41))), vec2(0.49));
 
-        vec2 diff = imageLoad(nasDataSurface, ivec2(prevWindowPos * ShadingRatePassParams.sourceTextureSizeInv)).rg;
+        vec2 diff = texture(nasDataSurface, prevWindowPos * ShadingRatePassParams.sourceTextureSizeInv).rg;
         vec2 diff2 = diff * bhv;
         vec2 diff4 = diff * bqv;
 
