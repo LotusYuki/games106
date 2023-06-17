@@ -65,12 +65,35 @@ public:
 
 	struct {
 		vks::Buffer computeNASDataBuffer;
+		vks::Buffer adaptiveShadingConstantsBuffer;
 	} uniformBuffers;
 
-	struct ComputeNASDataConstants
-	{
+	struct ComputeNASDataConstants{
 		float brightnessSensitivity = 0.07;
 	}computeNASDataConstants;
+
+	struct AdaptiveShadingConstants{
+		glm::mat4 reprojectionMatrix;
+		glm::vec2 previousViewOrigin;
+		glm::vec2 previousViewSize;
+		glm::vec2 sourceTextureSizeInv;
+		float errorSensitivity = 0.07f;
+		float motionSensitivity = 0.5f;
+	}adaptiveShadingConstants;
+
+	struct PreviousMatrices{
+		glm::mat4 perspective;
+		glm::mat4 view;
+	} previousMatrices;
+
+	struct Viewport {
+		float    x;
+		float    y;
+		float    width;
+		float    height;
+		float    minX = 0.0f;
+		float    minY = 0.0f;
+	} preViewport;
 
 	// Resources for the compute part of the example
 	struct Compute {
@@ -83,16 +106,16 @@ public:
 		VkPipelineLayout pipelineLayout;			// Layout of the compute pipeline
 		std::vector<VkPipeline> pipelines;			// Compute pipelines for image filters
 		int32_t pipelineIndex = 0;					// Current image filtering compute pipeline index
-	} compute;
+	} compute,computeShadingRate;
+	
 
-
+	VkSampler colorSampler;
 	VkRenderPass preframeRenderPass;
 	VkFramebuffer preframeFramebuffer;
 	VkCommandBuffer preframeCmdBuffer;
 	vks::Texture2D preframeTexture;
 	vks::Texture2D nasDataSurface;
 	vks::Texture2D vrsSurface;
-	VkSampler colorSampler;
 	void prepareTextureTarget(vks::Texture *tex, uint32_t width, uint32_t height, VkFormat format, VkImageLayout imageLayout = VK_IMAGE_LAYOUT_UNDEFINED);
 	void setupPreframeBuffer();
 	void buildPreframeCommandBuffers();
@@ -100,7 +123,9 @@ public:
 	void prepareGraphics();
 	void prepareNasDataCompute();
 	void buildComputeNasDataCommandBuffer();
-	void updateParams();
+	void prepareShadingRateCompute();
+	void buildComputeShadingRateCommandBuffer();
+	void initPreView();
 /*****************************************/
 
 	Pipelines basePipelines;

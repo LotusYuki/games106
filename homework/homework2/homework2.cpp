@@ -220,12 +220,12 @@ void VulkanExample::setupDescriptors()
 {
 	// Pool
 	const std::vector<VkDescriptorPoolSize> poolSizes = {
-		vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 4),
+		vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 5),
 		vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4),
 		// Compute pipelines uses a storage image for image reads and writes
-		vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 4),
+		vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 5),
 	};
-	VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, 3);
+	VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, 4);
 	VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
 
 	// Descriptor set layout
@@ -521,12 +521,18 @@ void VulkanExample::prepareUniformBuffers()
 		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
 		&uniformBuffers.computeNASDataBuffer,
 		sizeof(computeNASDataConstants)));
+	
+	VK_CHECK_RESULT(vulkanDevice->createBuffer(
+		VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+		&uniformBuffers.adaptiveShadingConstantsBuffer,
+		sizeof(adaptiveShadingConstants)));
 
 
 	VK_CHECK_RESULT(shaderData.buffer.map());
 	VK_CHECK_RESULT(uniformBuffers.computeNASDataBuffer.map());
+	VK_CHECK_RESULT(uniformBuffers.adaptiveShadingConstantsBuffer.map());
 	updateUniformBuffers();
-	updateParams();
 }
 
 void VulkanExample::updateUniformBuffers()
@@ -535,13 +541,20 @@ void VulkanExample::updateUniformBuffers()
 	shaderData.values.view = camera.matrices.view;
 	shaderData.values.viewPos = camera.viewPos;
 	shaderData.values.colorShadingRate = colorShadingRate;
+
+	glm::mat4 reprojectionMatrix = glm::inverse(camera.matrices.view) * previousMatrices.view;
+	adaptiveShadingConstants.reprojectionMatrix = glm::inverse(camera.matrices.perspective) * reprojectionMatrix * previousMatrices.perspective;
+	adaptiveShadingConstants.previousViewOrigin = glm::vec2(preViewport.minX,preViewport.minY);
+	adaptiveShadingConstants.previousViewSize = glm::vec2(preViewport.width,preViewport.height);
+	adaptiveShadingConstants.sourceTextureSizeInv = glm::vec2(1.f/width,1.f/height);
+
 	memcpy(shaderData.buffer.mapped, &shaderData.values, sizeof(shaderData.values));
+	memcpy(uniformBuffers.adaptiveShadingConstantsBuffer.mapped, &adaptiveShadingConstants, sizeof(adaptiveShadingConstants));
+	memcpy(uniformBuffers.computeNASDataBuffer.mapped, &computeNASDataConstants, sizeof(computeNASDataConstants));
+	previousMatrices.perspective = camera.matrices.perspective;
+	previousMatrices.view = camera.matrices.view;
 }
 
-void VulkanExample::updateParams()
-{
-	memcpy(uniformBuffers.computeNASDataBuffer.mapped, &computeNASDataConstants, sizeof(computeNASDataConstants));
-}
 
 void VulkanExample::prepare()
 {
@@ -571,6 +584,8 @@ void VulkanExample::prepare()
 	prepareTextureTarget(&preframeTexture, width, height, VK_FORMAT_B8G8R8A8_UNORM);
 	setupPreframeBuffer();
 
+	initPreView();
+
 	prepareShadingRateImage();
 	prepareUniformBuffers();
 
@@ -580,6 +595,7 @@ void VulkanExample::prepare()
 
 	prepareGraphics();
 	prepareNasDataCompute();
+	prepareShadingRateCompute();
 
 	buildCommandBuffers();
 	buildPreframeCommandBuffers();
@@ -602,9 +618,19 @@ void VulkanExample::draw()
 	computeSubmitInfo.pSignalSemaphores = &compute.semaphore;
 	VK_CHECK_RESULT(vkQueueSubmit(compute.queue, 1, &computeSubmitInfo, VK_NULL_HANDLE));
 
+	computeSubmitInfo = vks::initializers::submitInfo();
+	computeSubmitInfo.commandBufferCount = 1;
+	computeSubmitInfo.pCommandBuffers = &computeShadingRate.commandBuffer;
+	computeSubmitInfo.waitSemaphoreCount = 1;
+	computeSubmitInfo.pWaitSemaphores = &compute.semaphore;
+	computeSubmitInfo.pWaitDstStageMask = &waitStageMask;
+	computeSubmitInfo.signalSemaphoreCount = 1;
+	computeSubmitInfo.pSignalSemaphores = &computeShadingRate.semaphore;
+	VK_CHECK_RESULT(vkQueueSubmit(computeShadingRate.queue, 1, &computeSubmitInfo, VK_NULL_HANDLE));
+
 	VulkanExampleBase::prepareFrame();
 	VkPipelineStageFlags graphicsWaitStageMasks[] = { VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
-	VkSemaphore graphicsWaitSemaphores[] = { compute.semaphore, semaphores.presentComplete };
+	VkSemaphore graphicsWaitSemaphores[] = { compute.semaphore, computeShadingRate.semaphore, semaphores.presentComplete };
 	VkSemaphore graphicsSignalSemaphores[] = { graphics.semaphore, semaphores.renderComplete };
 
 	submitInfo.commandBufferCount = 1;
@@ -650,7 +676,13 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay *overlay)
 		updateUniformBuffers();
 	}
 	if (overlay->inputFloat("BrightnessSensitivity", &computeNASDataConstants.brightnessSensitivity, 0.01f, 2)) {
-		updateParams();
+		updateUniformBuffers();
+	}
+	if (overlay->inputFloat("errorSensitivity", &adaptiveShadingConstants.errorSensitivity, 0.01f, 2)) {
+		updateUniformBuffers();
+	}
+	if (overlay->inputFloat("motionSensitivity", &adaptiveShadingConstants.motionSensitivity, 0.01f, 2)) {
+		updateUniformBuffers();
 	}
 }
 
@@ -691,10 +723,11 @@ void VulkanExample::prepareNasDataCompute()
 	VkDescriptorSetAllocateInfo allocInfo =
 		vks::initializers::descriptorSetAllocateInfo(descriptorPool, &compute.descriptorSetLayout, 1);
 
+
 	VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &compute.descriptorSet));
 	std::vector<VkWriteDescriptorSet> computeWriteDescriptorSets = {
 		vks::initializers::writeDescriptorSet(compute.descriptorSet, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 0, &preframeTexture.descriptor),
-		vks::initializers::writeDescriptorSet(compute.descriptorSet, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, &vrsSurface.descriptor),
+		vks::initializers::writeDescriptorSet(compute.descriptorSet, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, &nasDataSurface.descriptor),
 		vks::initializers::writeDescriptorSet(compute.descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2, &uniformBuffers.computeNASDataBuffer.descriptor),
 	};
 	vkUpdateDescriptorSets(device, computeWriteDescriptorSets.size(), computeWriteDescriptorSets.data(), 0, NULL);
@@ -744,7 +777,7 @@ void VulkanExample::buildComputeNasDataCommandBuffer()
 	vkCmdBindPipeline(compute.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute.pipelines[0]);
 	vkCmdBindDescriptorSets(compute.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute.pipelineLayout, 0, 1, &compute.descriptorSet, 0, 0);
 
-	vkCmdDispatch(compute.commandBuffer, vrsSurface.width, vrsSurface.height, 1);
+	vkCmdDispatch(compute.commandBuffer, nasDataSurface.width, nasDataSurface.height, 1);
 
 	vkEndCommandBuffer(compute.commandBuffer);
 }
@@ -762,6 +795,112 @@ void VulkanExample::prepareGraphics()
 	submitInfo.pSignalSemaphores = &graphics.semaphore;
 	VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
 	VK_CHECK_RESULT(vkQueueWaitIdle(queue));	
+}
+
+void VulkanExample::prepareShadingRateCompute()
+{
+	// Get a compute queue from the device
+	vkGetDeviceQueue(device, vulkanDevice->queueFamilyIndices.compute, 0, &computeShadingRate.queue);
+
+	// Create compute pipeline
+	// Compute pipelines are created separate from graphics pipelines even if they use the same queue
+
+	std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
+		// Binding 0: Gbuffer Depth image (read-only)
+		vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT, 0),
+		// Binding 1: nasDataSurface (read-only)
+		vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT, 1),
+		// Binding 2: Output vrsSurface image (write)
+		vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT, 2),
+		//Binding 3 ： unibuffer
+		vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 3),
+	};
+
+
+	VkDescriptorSetLayoutCreateInfo descriptorLayout = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
+	VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device,	&descriptorLayout, nullptr, &computeShadingRate.descriptorSetLayout));
+
+	VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo =
+		vks::initializers::pipelineLayoutCreateInfo(&computeShadingRate.descriptorSetLayout, 1);
+
+	VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &computeShadingRate.pipelineLayout));
+
+	VkDescriptorSetAllocateInfo allocInfo =
+		vks::initializers::descriptorSetAllocateInfo(descriptorPool, &computeShadingRate.descriptorSetLayout, 1);
+
+	VkDescriptorImageInfo preframeDepthStencilTexture =
+			vks::initializers::descriptorImageInfo(
+				colorSampler,
+				preframeDepthStencil.view,
+				VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+	VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &computeShadingRate.descriptorSet));
+	std::vector<VkWriteDescriptorSet> computeWriteDescriptorSets = {
+		vks::initializers::writeDescriptorSet(computeShadingRate.descriptorSet, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 0, &preframeDepthStencilTexture),
+		vks::initializers::writeDescriptorSet(computeShadingRate.descriptorSet, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, &nasDataSurface.descriptor),
+		vks::initializers::writeDescriptorSet(computeShadingRate.descriptorSet, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2, &vrsSurface.descriptor),
+		vks::initializers::writeDescriptorSet(computeShadingRate.descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3, &uniformBuffers.adaptiveShadingConstantsBuffer.descriptor),
+	};
+	vkUpdateDescriptorSets(device, computeWriteDescriptorSets.size(), computeWriteDescriptorSets.data(), 0, NULL);
+
+	// Create compute shader pipelines
+	VkComputePipelineCreateInfo computePipelineCreateInfo =
+		vks::initializers::computePipelineCreateInfo(computeShadingRate.pipelineLayout, 0);
+
+	computePipelineCreateInfo.stage = loadShader(getHomeworkShadersPath() + "homework2/computeShadingRate.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT);
+	VkPipeline pipeline;
+	VK_CHECK_RESULT(vkCreateComputePipelines(device, pipelineCache, 1, &computePipelineCreateInfo, nullptr, &pipeline));
+	computeShadingRate.pipelines.push_back(pipeline);
+
+	// Separate command pool as queue family for compute may be different than graphics
+	VkCommandPoolCreateInfo cmdPoolInfo = {};
+	cmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+	cmdPoolInfo.queueFamilyIndex = vulkanDevice->queueFamilyIndices.compute;
+	cmdPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+	VK_CHECK_RESULT(vkCreateCommandPool(device, &cmdPoolInfo, nullptr, &computeShadingRate.commandPool));
+
+	// Create a command buffer for compute operations
+	VkCommandBufferAllocateInfo cmdBufAllocateInfo =
+		vks::initializers::commandBufferAllocateInfo(
+			computeShadingRate.commandPool,
+			VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+			1);
+
+	VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &computeShadingRate.commandBuffer));
+
+	// Semaphore for compute & graphics sync
+	VkSemaphoreCreateInfo semaphoreCreateInfo = vks::initializers::semaphoreCreateInfo();
+	VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &computeShadingRate.semaphore));
+
+	// Build a single command buffer containing the compute dispatch commands
+	buildComputeShadingRateCommandBuffer();
+}
+
+void VulkanExample::buildComputeShadingRateCommandBuffer()
+{
+	// Flush the queue if we're rebuilding the command buffer after a pipeline change to ensure it's not currently in use
+	vkQueueWaitIdle(computeShadingRate.queue);
+
+	VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
+
+	VK_CHECK_RESULT(vkBeginCommandBuffer(computeShadingRate.commandBuffer, &cmdBufInfo));
+
+	vkCmdBindPipeline(computeShadingRate.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computeShadingRate.pipelines[0]);
+	vkCmdBindDescriptorSets(computeShadingRate.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computeShadingRate.pipelineLayout, 0, 1, &computeShadingRate.descriptorSet, 0, 0);
+
+	vkCmdDispatch(computeShadingRate.commandBuffer, vrsSurface.width, vrsSurface.height, 1);
+
+	vkEndCommandBuffer(computeShadingRate.commandBuffer);
+}
+
+void VulkanExample::initPreView(){
+	preViewport.width = width;
+	preViewport.height = height;
+	preViewport.minX = 0.0f;
+	preViewport.minY = 0.0f;
+
+	previousMatrices.perspective = camera.matrices.perspective;
+	previousMatrices.view = camera.matrices.view;
 }
 
 /*
@@ -1119,6 +1258,21 @@ void VulkanExample::setupPreframeBuffer()
 
 	viewAttachments[0] = preframeTexture.view;
 	VK_CHECK_RESULT(vkCreateFramebuffer(device, &frameBufferCreateInfo, nullptr, &preframeFramebuffer));
+
+	// Create sampler to sample from the color attachments
+	VkSamplerCreateInfo sampler = vks::initializers::samplerCreateInfo();
+	sampler.magFilter = VK_FILTER_NEAREST;
+	sampler.minFilter = VK_FILTER_NEAREST;
+	sampler.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+	sampler.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	sampler.addressModeV = sampler.addressModeU;
+	sampler.addressModeW = sampler.addressModeU;
+	sampler.mipLodBias = 0.0f;
+	sampler.maxAnisotropy = 1.0f;
+	sampler.minLod = 0.0f;
+	sampler.maxLod = 1.0f;
+	sampler.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+	VK_CHECK_RESULT(vkCreateSampler(device, &sampler, nullptr, &colorSampler));
 }
 
 VULKAN_EXAMPLE_MAIN()

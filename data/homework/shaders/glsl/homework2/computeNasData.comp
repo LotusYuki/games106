@@ -3,7 +3,7 @@
 
 layout (local_size_x = 8, local_size_y = 4, local_size_z = 1) in;
 layout (binding = 0, rgba8) uniform readonly image2D prevFrameColors;
-layout (binding = 1, r32ui) uniform uimage2D vrsSurface;
+layout (binding = 1, rgba16f) uniform image2D nasDataSurface;
 layout (binding = 2) uniform ComputeNASDataConstants 
 {
 	float brightnessSensitivity;
@@ -75,8 +75,8 @@ void main()
     float maxDy = max(max(dy.x, dy.y), max(dy.z, dy.w));
     float errXH = subgroupMax(maxDx) / abs(avgLuma);
     float errYH = subgroupMax(maxDy) / abs(avgLuma);
-    float errXQ = errXH * 2.13;
-    float errYQ = errYH * 2.13;
+    //float errXQ = errXH * 2.13;
+    //float errYQ = errYH * 2.13;
 
     // VK_SHADING_RATE_PALETTE_ENTRY_1_INVOCATION_PER_PIXEL_NV = 5,
     // VK_SHADING_RATE_PALETTE_ENTRY_1_INVOCATION_PER_2X1_PIXELS_NV = 6,
@@ -85,55 +85,55 @@ void main()
     // VK_SHADING_RATE_PALETTE_ENTRY_1_INVOCATION_PER_4X2_PIXELS_NV = 9,
     // VK_SHADING_RATE_PALETTE_ENTRY_1_INVOCATION_PER_2X4_PIXELS_NV = 10,
     // VK_SHADING_RATE_PALETTE_ENTRY_1_INVOCATION_PER_4X4_PIXELS_NV = 11,
-    float threshold = computeNASDataConstants.brightnessSensitivity;
+    // float threshold = computeNASDataConstants.brightnessSensitivity;
 
-    uint ShadingRate = 0;
-    uint rate = 5;
-    ShadingRate |= ((errXH >= threshold) ? 0 : ((errXQ > threshold) ? 0x4 : 0x8));
-    ShadingRate |= ((errYH >= threshold) ? 0 : ((errYQ > threshold) ? 0x1 : 0x2));
+    // uint ShadingRate = 0;
+    // uint rate = 5;
+    // ShadingRate |= ((errXH >= threshold) ? 0 : ((errXQ > threshold) ? 0x4 : 0x8));
+    // ShadingRate |= ((errYH >= threshold) ? 0 : ((errYQ > threshold) ? 0x1 : 0x2));
 
-    // Disable 4x4 shading rate (low quality, limited perf gain)
-    if (ShadingRate == 0xa)
-    {
-        ShadingRate = (errXH > errYH) ? 0x6 : 0x9; // use 2x4 or 4x2 based on directional gradient
-    }
-    // Disable 4x1 or 1x4 shading rate (unsupported)
-    else if (ShadingRate == 0x8)
-    {
-        ShadingRate = 0x4;
-    }
-    else if (ShadingRate == 0x2)
-    {
-        ShadingRate = 0x1;
-    }
+    // // Disable 4x4 shading rate (low quality, limited perf gain)
+    // if (ShadingRate == 0xa)
+    // {
+    //     ShadingRate = (errXH > errYH) ? 0x6 : 0x9; // use 2x4 or 4x2 based on directional gradient
+    // }
+    // // Disable 4x1 or 1x4 shading rate (unsupported)
+    // else if (ShadingRate == 0x8)
+    // {
+    //     ShadingRate = 0x4;
+    // }
+    // else if (ShadingRate == 0x2)
+    // {
+    //     ShadingRate = 0x1;
+    // }
 
 
-    if(ShadingRate == 0)
-    {
-        rate = 5;
-    }
-    else if(ShadingRate == 0x1)
-    {
-        rate = 7;
-    }
-    else if(ShadingRate == 0x4)
-    {
-        rate = 6;
-    }
-    else if(ShadingRate == 0x5)
-    {
-        rate = 8;
-    }
-    else if(ShadingRate == 0x6)
-    {
-        rate = 10;
-    }
-    else if(ShadingRate == 0x9)
-    {
-        rate = 9;
-    }
+    // if(ShadingRate == 0)
+    // {
+    //     rate = 5;
+    // }
+    // else if(ShadingRate == 0x1)
+    // {
+    //     rate = 7;
+    // }
+    // else if(ShadingRate == 0x4)
+    // {
+    //     rate = 6;
+    // }
+    // else if(ShadingRate == 0x5)
+    // {
+    //     rate = 8;
+    // }
+    // else if(ShadingRate == 0x6)
+    // {
+    //     rate = 10;
+    // }
+    // else if(ShadingRate == 0x9)
+    // {
+    //     rate = 9;
+    // }
 
-    imageStore(vrsSurface, ivec2(gl_WorkGroupID.xy), uvec4(rate,0,0,1));
+    imageStore(nasDataSurface, ivec2(gl_WorkGroupID.xy), vec4(errXH,errYH,0,0));
 
 }
 
